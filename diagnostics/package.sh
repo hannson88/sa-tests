@@ -28,6 +28,9 @@ COPYFILE_DISABLE=1 tar \
   -czf "$OUTPUT/$PACKAGE_NAME.tar.gz" \
   "$PACKAGE_NAME"
 cp "$TEMPORARY/$PACKAGE_NAME/install.sh" "$OUTPUT/install.sh"
+sed "s/@RELEASE_REF@/v$VERSION/" "$OUTPUT/install.sh" > "$OUTPUT/install.sh.pinned"
+mv "$OUTPUT/install.sh.pinned" "$OUTPUT/install.sh"
+chmod 0755 "$OUTPUT/install.sh"
 (
   cd "$OUTPUT"
   sha256sum "$PACKAGE_NAME.tar.gz" install.sh > checksums.txt

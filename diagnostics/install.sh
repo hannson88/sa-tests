@@ -5,6 +5,10 @@ REPOSITORY="${SENTRYALERT_DIAG_REPOSITORY:-hannson88/sa-tests}"
 INSTALL_ROOT="${SENTRYALERT_DIAG_INSTALL_ROOT:-/opt/sentryalert-diagnostics}"
 DATA_ROOT="${SENTRYALERT_DIAG_DATA_ROOT:-/mutable/diagnostics}"
 ASSET_PREFIX="sentryalert-diagnostics"
+RELEASE_REF="${SENTRYALERT_DIAG_RELEASE_REF:-@RELEASE_REF@}"
+case "$RELEASE_REF" in
+  @*) RELEASE_REF="latest" ;;
+esac
 if [ -n "${BASH_SOURCE[0]:-}" ]; then
   SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd || pwd)"
 else
@@ -26,16 +30,22 @@ download() {
 }
 
 bootstrap() {
-  local temporary base checksums archive_name archive extracted
+  local temporary base query checksums archive_name archive extracted
   temporary="$(mktemp -d)"
   trap 'rm -rf "$temporary"' EXIT
-  base="https://github.com/$REPOSITORY/releases/latest/download"
+  if [ "$RELEASE_REF" = "latest" ]; then
+    base="https://github.com/$REPOSITORY/releases/latest/download"
+    query="?cache_bust=$(date +%s)"
+  else
+    base="https://github.com/$REPOSITORY/releases/download/$RELEASE_REF"
+    query=""
+  fi
   checksums="$temporary/checksums.txt"
-  download "$base/checksums.txt" "$checksums"
+  download "$base/checksums.txt$query" "$checksums"
   archive_name="$(awk '$2 ~ /^sentryalert-diagnostics-[0-9].*\.tar\.gz$/ { print $2; exit }' "$checksums")"
   [ -n "$archive_name" ] || fail "No diagnostics archive was listed in checksums.txt."
   archive="$temporary/$archive_name"
-  download "$base/$archive_name" "$archive"
+  download "$base/$archive_name$query" "$archive"
   (
     cd "$temporary"
     sha256sum -c checksums.txt --ignore-missing
