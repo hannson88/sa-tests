@@ -97,4 +97,5 @@ would hide the evidence this module exists to collect.
 - USB serial numbers and filesystem identifiers can be diagnostically valuable and
   may appear in the bundle. Tokens and chat IDs do not.
 - Some deployed SentryAlert images omit both `package.json` and `package-lock.json`.
-  Their application version is reported as unavailable rather than guessed.
+  The collector then reads the explicit first-line version banner from the bundled
+  `app.js`; if neither source exists, the version is reported as unavailable.

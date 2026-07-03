@@ -44,6 +44,25 @@ class VersionDetectionTests(unittest.TestCase):
             )
             self.assertEqual(_sentryalert_version(root), "0.6.2.8")
 
+    def test_bundled_application_banner_is_used_as_fallback(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "app.js").write_text(
+                "// v0.6.3.2\nvar bundledApplication=true;\n", encoding="utf-8"
+            )
+            self.assertEqual(_sentryalert_version(root), "0.6.3.2")
+
+    def test_arbitrary_application_content_is_not_treated_as_version(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "app.js").write_text(
+                "const example='0.6.3.2';\n", encoding="utf-8"
+            )
+            self.assertEqual(
+                _sentryalert_version(root),
+                "unavailable (package metadata absent)",
+            )
+
     def test_missing_package_metadata_is_reported_explicitly(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             self.assertEqual(

@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import tempfile
 import zipfile
 from pathlib import Path
@@ -27,6 +28,14 @@ def _sentryalert_version(root: Path) -> str:
                 return str(version)
         except (OSError, ValueError, json.JSONDecodeError):
             continue
+    try:
+        with (root / "app.js").open("r", encoding="utf-8", errors="replace") as source:
+            banner = source.readline(256)
+        match = re.fullmatch(r"\s*//\s*v(\d+(?:\.\d+){2,3})\s*", banner)
+        if match:
+            return match.group(1)
+    except OSError:
+        pass
     return "unavailable (package metadata absent)"
 
 
