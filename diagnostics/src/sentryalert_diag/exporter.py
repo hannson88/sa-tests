@@ -18,12 +18,16 @@ def _version() -> str:
 
 
 def _sentryalert_version(root: Path) -> str:
-    package = root / "package.json"
-    try:
-        value = json.loads(package.read_text(encoding="utf-8"))
-        return str(value.get("version", "unknown"))
-    except (OSError, ValueError, json.JSONDecodeError):
-        return "unknown"
+    for name in ("package.json", "package-lock.json"):
+        package = root / name
+        try:
+            value = json.loads(package.read_text(encoding="utf-8-sig"))
+            version = value.get("version")
+            if version:
+                return str(version)
+        except (OSError, ValueError, json.JSONDecodeError):
+            continue
+    return "unknown"
 
 
 def _configuration_summary(root: Path) -> dict[str, Any]:
@@ -80,7 +84,7 @@ def _summary(state: dict[str, Any], inventory: dict[str, Any]) -> str:
         f"Snapshots: {state.get('snapshot_count', 0)}",
         f"Package version: {inventory.get('package_version', 'unknown')}",
         f"SentryAlert version: {inventory.get('sentryalert_version', 'unknown')}",
-        f"Telegram delivery: {delivery.get('status', 'not attempted')}",
+        f"Telegram delivery at bundle creation: {delivery.get('status', 'not attempted')}",
         "",
         "This bundle is observational. Diagnostics did not modify USB gadget",
         "configuration, backing storage, mounts, partitions, or SentryAlert.",

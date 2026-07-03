@@ -12,8 +12,9 @@ from unittest import mock
 DIAGNOSTICS_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(DIAGNOSTICS_ROOT / "src"))
 
-from sentryalert_diag import atomic, state
+from sentryalert_diag import atomic, config as diag_config, state
 from sentryalert_diag.cli import parse_duration
+from sentryalert_diag.exporter import _sentryalert_version
 from sentryalert_diag.modules.usb import UsbDiagnosticModule
 
 
@@ -26,6 +27,22 @@ class DurationTests(unittest.TestCase):
     def test_duration_rejects_zero(self) -> None:
         with self.assertRaises(Exception):
             parse_duration("0m")
+
+    def test_default_runtime_is_thirty_minutes(self) -> None:
+        with tempfile.TemporaryDirectory() as directory, mock.patch.object(
+            diag_config, "CONFIG_PATH", Path(directory) / "missing.json"
+        ):
+            self.assertEqual(diag_config.load_config()["default_runtime_seconds"], 1800)
+
+
+class VersionDetectionTests(unittest.TestCase):
+    def test_package_lock_is_used_when_package_json_is_missing(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "package-lock.json").write_text(
+                '\ufeff{"version":"0.6.2.8"}\n', encoding="utf-8"
+            )
+            self.assertEqual(_sentryalert_version(root), "0.6.2.8")
 
 
 class AtomicStateTests(unittest.TestCase):
@@ -156,6 +173,8 @@ class EndToEndSessionTests(unittest.TestCase):
             with zipfile.ZipFile(bundle) as archive:
                 self.assertIn("SUMMARY.txt", archive.namelist())
                 self.assertIn("MANIFEST.sha256", archive.namelist())
+                bundled_state = json.loads(archive.read("state.json"))
+                self.assertEqual(bundled_state["telegram_delivery"]["status"], "pending")
 
             # Simulate power loss after completion was checkpointed but before
             # export finished. Boot recovery must retry finalization immediately.

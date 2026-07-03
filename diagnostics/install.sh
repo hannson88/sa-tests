@@ -94,6 +94,10 @@ mv -Tf "$INSTALL_ROOT/current.new" "$INSTALL_ROOT/current"
 
 if [ ! -f "$DATA_ROOT/config.json" ]; then
   install -m 0600 "$release_dir/config/default.json" "$DATA_ROOT/config.json"
+elif grep -q '"default_runtime_seconds"[[:space:]]*:[[:space:]]*7200' "$DATA_ROOT/config.json"; then
+  sed -i \
+    's/"default_runtime_seconds"[[:space:]]*:[[:space:]]*7200/"default_runtime_seconds": 1800/' \
+    "$DATA_ROOT/config.json"
 fi
 
 install -m 0644 "$release_dir/systemd/sentryalert-diagnostics.service" \

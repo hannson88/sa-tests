@@ -65,6 +65,7 @@ class DiagnosticsRunner:
             bundle_state = dict(state)
             bundle_state["enabled"] = False
             bundle_state["status"] = desired_status
+            bundle_state["telegram_delivery"] = {"status": "pending"}
             bundle = create_bundle(bundle_state, self.config)
         except Exception as exception:  # final evidence must survive delivery/export errors
             state["completion_error"] = str(exception)

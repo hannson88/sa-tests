@@ -30,7 +30,7 @@ sudo sentryalert-diag-uninstall --purge
 ```
 
 Supported duration syntax includes `30m`, `2h`, `6h`, and `24h`. The default is
-two hours of diagnostics runner uptime. Time while the computer is off does not
+30 minutes of diagnostics runner uptime. Time while the computer is off does not
 count.
 
 ## Storage
@@ -74,4 +74,3 @@ Upload these files from `dist/diagnostics/` to a GitHub release:
 - `checksums.txt`
 
 See [`docs/architecture.md`](docs/architecture.md) for design and recovery details.
-
