@@ -96,3 +96,5 @@ would hide the evidence this module exists to collect.
   local for manual resend.
 - USB serial numbers and filesystem identifiers can be diagnostically valuable and
   may appear in the bundle. Tokens and chat IDs do not.
+- Some deployed SentryAlert images omit both `package.json` and `package-lock.json`.
+  Their application version is reported as unavailable rather than guessed.

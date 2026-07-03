@@ -27,7 +27,7 @@ def _sentryalert_version(root: Path) -> str:
                 return str(version)
         except (OSError, ValueError, json.JSONDecodeError):
             continue
-    return "unknown"
+    return "unavailable (package metadata absent)"
 
 
 def _configuration_summary(root: Path) -> dict[str, Any]:

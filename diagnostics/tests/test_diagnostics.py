@@ -44,6 +44,13 @@ class VersionDetectionTests(unittest.TestCase):
             )
             self.assertEqual(_sentryalert_version(root), "0.6.2.8")
 
+    def test_missing_package_metadata_is_reported_explicitly(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            self.assertEqual(
+                _sentryalert_version(Path(directory)),
+                "unavailable (package metadata absent)",
+            )
+
 
 class AtomicStateTests(unittest.TestCase):
     def test_atomic_json_has_no_temporary_file(self) -> None:
