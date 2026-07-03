@@ -5,7 +5,11 @@ REPOSITORY="${SENTRYALERT_DIAG_REPOSITORY:-hannson88/sa-tests}"
 INSTALL_ROOT="${SENTRYALERT_DIAG_INSTALL_ROOT:-/opt/sentryalert-diagnostics}"
 DATA_ROOT="${SENTRYALERT_DIAG_DATA_ROOT:-/mutable/diagnostics}"
 ASSET_PREFIX="sentryalert-diagnostics"
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd || pwd)"
+if [ -n "${BASH_SOURCE[0]:-}" ]; then
+  SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd || pwd)"
+else
+  SCRIPT_DIR=""
+fi
 
 say() { printf '%s\n' "$*"; }
 fail() { say "ERROR: $*" >&2; exit 1; }
@@ -42,7 +46,7 @@ bootstrap() {
   exec "$extracted/install.sh" --from-bundle
 }
 
-if [ ! -d "$SCRIPT_DIR/src/sentryalert_diag" ]; then
+if [ -z "$SCRIPT_DIR" ] || [ ! -d "$SCRIPT_DIR/src/sentryalert_diag" ]; then
   bootstrap
 fi
 

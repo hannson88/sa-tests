@@ -20,7 +20,8 @@ chmod 0755 \
   "$TEMPORARY/$PACKAGE_NAME/uninstall.sh" \
   "$TEMPORARY/$PACKAGE_NAME/bin/sentryalert-diag"
 
-tar \
+COPYFILE_DISABLE=1 tar \
+  --no-xattrs \
   --exclude='__pycache__' \
   --exclude='*.pyc' \
   -C "$TEMPORARY" \
