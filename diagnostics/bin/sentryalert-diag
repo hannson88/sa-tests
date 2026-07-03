@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+invoked_as="$(basename "$0")"
+script_path="$(readlink -f "${BASH_SOURCE[0]}")"
+package_root="$(cd "$(dirname "$script_path")/.." && pwd)"
+
+case "$invoked_as" in
+  sentryalert-usb-diag-start) set -- start "$@" ;;
+  sentryalert-usb-diag-status) set -- status "$@" ;;
+  sentryalert-usb-diag-stop) set -- stop "$@" ;;
+  sentryalert-usb-diag-export) set -- export "$@" ;;
+  sentryalert-usb-diag-resend) set -- resend "$@" ;;
+  sentryalert-diag-version) set -- version "$@" ;;
+  sentryalert-diag-update) exec "$package_root/update.sh" "$@" ;;
+  sentryalert-diag-uninstall) exec "$package_root/uninstall.sh" "$@" ;;
+esac
+
+export PYTHONPATH="$package_root/src${PYTHONPATH:+:$PYTHONPATH}"
+export PYTHONDONTWRITEBYTECODE=1
+exec python3 "$package_root/src/diagnostics_cli.py" "$@"

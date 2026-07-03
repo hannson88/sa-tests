@@ -1,0 +1,23 @@
+[Unit]
+Description=SentryAlert Diagnostics Framework
+After=mutable.mount
+RequiresMountsFor=/mutable
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/sentryalert-diag daemon
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=20
+UMask=0077
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ProtectControlGroups=true
+ProtectKernelModules=true
+ReadWritePaths=/mutable/diagnostics
+
+[Install]
+WantedBy=multi-user.target
+

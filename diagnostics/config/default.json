@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "default_runtime_seconds": 7200,
+  "checkpoint_seconds": 30,
+  "command_timeout_seconds": 3,
+  "snapshot_cooldown_seconds": 120,
+  "maximum_snapshots": 10,
+  "maximum_log_bytes": 8388608,
+  "sentryalert_root": "/opt/SentryAlert",
+  "telegram_enabled": true
+}
