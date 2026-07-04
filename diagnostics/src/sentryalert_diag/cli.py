@@ -14,6 +14,8 @@ from .paths import PACKAGE_ROOT, session_root
 from .runner import run_daemon
 from .state import boot_id, load_state, save_state, state_lock, utc_now
 from .telegram import deliver
+from .modules.registry import MODULE_NAMES, create_module
+from .validator import validate_bundle
 
 
 def require_root() -> None:
@@ -53,14 +55,20 @@ def command_start(args: argparse.Namespace) -> int:
     with state_lock():
         current = load_state()
         if current and current.get("enabled"):
-            raise SystemExit(f"USB diagnostics are already running ({current.get('session_id')}).")
-        root = session_root(session_id)
+            raise SystemExit(
+                f"{str(current.get('module', 'usb')).title()} diagnostics are already running "
+                f"({current.get('session_id')})."
+            )
+        module_name = args.module
+        root = session_root(session_id, module_name)
         (root / "logs").mkdir(parents=True, exist_ok=True)
         (root / "snapshots").mkdir(parents=True, exist_ok=True)
+        for filename in ("events.jsonl", "samples.jsonl"):
+            (root / "logs" / filename).touch(mode=0o600, exist_ok=True)
         state = {
-            "schema_version": 1,
+            "schema_version": 2,
             "package_version": package_version,
-            "module": "usb",
+            "module": module_name,
             "enabled": True,
             "status": "running",
             "session_id": session_id,
@@ -70,13 +78,16 @@ def command_start(args: argparse.Namespace) -> int:
             "last_checkpoint_at": utc_now(),
             "last_boot_id": boot_id(),
             "event_count": 0,
+            "known_event_count": 0,
+            "candidate_event_count": 0,
+            "user_marker_count": 0,
             "snapshot_count": 0,
             "stop_requested": False,
             "telegram_delivery": {"status": "not_attempted"},
         }
         save_state(state)
     systemctl("start", "sentryalert-diagnostics.service")
-    print(f"USB diagnostics started: {session_id}")
+    print(f"{module_name.title()} diagnostics started: {session_id}")
     print(f"Powered-on runtime target: {target} seconds")
     return 0
 
@@ -84,7 +95,7 @@ def command_start(args: argparse.Namespace) -> int:
 def command_status(_args: argparse.Namespace) -> int:
     state = load_state()
     if not state:
-        print("USB diagnostics have not been started.")
+        print("Diagnostics have not been started.")
         return 1
     print(json.dumps(state, indent=2, sort_keys=True))
     return 0
@@ -95,7 +106,7 @@ def command_stop(_args: argparse.Namespace) -> int:
     with state_lock():
         state = load_state(required=True)
         if not state.get("enabled"):
-            print("USB diagnostics are not running.")
+            print("Diagnostics are not running.")
             return 0
         state["stop_requested"] = True
         save_state(state)
@@ -142,10 +153,45 @@ def command_version(_args: argparse.Namespace) -> int:
     return 0
 
 
+def command_mark(args: argparse.Namespace) -> int:
+    require_root()
+    marker = {
+        "id": uuid.uuid4().hex,
+        "timestamp": utc_now(),
+        "source": "user",
+        "classification": "user_marker",
+        "severity": "notice",
+        "message": args.message,
+    }
+    with state_lock():
+        state = load_state(required=True)
+        if not state.get("enabled"):
+            raise SystemExit("Diagnostics are not running.")
+        state.setdefault("pending_markers", []).append(marker)
+        save_state(state)
+    systemctl("kill", "--signal=SIGUSR1", "sentryalert-diagnostics.service")
+    print("Incident marked. A detailed snapshot will be captured.")
+    return 0
+
+
+def command_modules(_args: argparse.Namespace) -> int:
+    for name in MODULE_NAMES:
+        module = create_module(name)
+        print(f"{name:12} {module.title}")
+    return 0
+
+
+def command_verify(args: argparse.Namespace) -> int:
+    result = validate_bundle(args.bundle)
+    print(json.dumps(result, indent=2, sort_keys=True))
+    return 0 if result["valid"] else 1
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="sentryalert-diag")
     subparsers = parser.add_subparsers(dest="command", required=True)
     start = subparsers.add_parser("start")
+    start.add_argument("module", nargs="?", choices=MODULE_NAMES, default="usb")
     start.add_argument("--duration", type=parse_duration)
     start.set_defaults(function=command_start)
     subparsers.add_parser("status").set_defaults(function=command_status)
@@ -153,6 +199,13 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers.add_parser("export").set_defaults(function=command_export)
     subparsers.add_parser("resend").set_defaults(function=command_resend)
     subparsers.add_parser("version").set_defaults(function=command_version)
+    mark = subparsers.add_parser("mark")
+    mark.add_argument("message")
+    mark.set_defaults(function=command_mark)
+    subparsers.add_parser("modules").set_defaults(function=command_modules)
+    verify = subparsers.add_parser("verify")
+    verify.add_argument("bundle", type=Path)
+    verify.set_defaults(function=command_verify)
     subparsers.add_parser("daemon").set_defaults(function=lambda _args: run_daemon())
     return parser
 

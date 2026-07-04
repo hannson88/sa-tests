@@ -19,9 +19,26 @@ changes storage, gadget, mount, partition, recording, encoding, or alert behavio
 5. The delivery adapter reads the existing SentryAlert Telegram configuration only
    inside a short-lived helper process.
 
-Future modules implement the `DiagnosticModule` interface and receive their own
-persistent module directory. They do not require changes to state durability,
-export, delivery, installation, or service lifecycle.
+Modules implement the `DiagnosticModule` interface, publish a versioned evidence
+contract, and receive their own persistent module directory. The registry currently
+includes USB, application, storage, camera, network, system, and performance.
+Only one module runs at a time to keep device overhead predictable.
+
+## Evidence model
+
+Every module produces three evidence layers:
+
+1. bounded periodic samples containing raw source output;
+2. classified known and suspicious candidate events;
+3. detailed snapshots triggered by events or explicit user markers.
+
+Text patterns classify evidence but do not define what is retained. This preserves
+unknown failures for later analysis. Sequence overlap, rather than message hashes,
+tracks appended logs so repeated identical errors are not discarded.
+
+Every bundle contains `REPORT.txt`, an always-present `events.jsonl`, and
+`CONTRACT.json`. The report lists unavailable sources, because zero events cannot
+establish health when required evidence was inaccessible.
 
 ## Powered-on runtime
 

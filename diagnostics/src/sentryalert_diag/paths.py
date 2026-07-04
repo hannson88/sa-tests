@@ -9,10 +9,16 @@ DATA_ROOT = Path(os.environ.get("SENTRYALERT_DIAG_DATA_ROOT", "/mutable/diagnost
 MODULE_ROOT = DATA_ROOT / "usb-diag"
 STATE_PATH = MODULE_ROOT / "state.json"
 PREVIOUS_STATE_PATH = MODULE_ROOT / "state.previous.json"
-EXPORTS_DIR = MODULE_ROOT / "exports"
 CONFIG_PATH = DATA_ROOT / "config.json"
 
 
-def session_root(session_id: str) -> Path:
-    return MODULE_ROOT / "sessions" / session_id
+def module_root(module: str = "usb") -> Path:
+    return DATA_ROOT / f"{module}-diag"
 
+
+def exports_dir(module: str = "usb") -> Path:
+    return module_root(module) / "exports"
+
+
+def session_root(session_id: str, module: str = "usb") -> Path:
+    return module_root(module) / "sessions" / session_id

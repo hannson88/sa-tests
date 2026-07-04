@@ -9,7 +9,8 @@ import zipfile
 from pathlib import Path
 from typing import Any
 
-from .paths import EXPORTS_DIR, PACKAGE_ROOT, session_root
+from .paths import PACKAGE_ROOT, exports_dir, session_root
+from .modules.registry import create_module
 from .state import utc_now
 from .system import read_text, run_command
 
@@ -80,8 +81,8 @@ def _inventory(config: dict[str, Any]) -> dict[str, Any]:
 def _summary(state: dict[str, Any], inventory: dict[str, Any]) -> str:
     delivery = state.get("telegram_delivery", {})
     lines = [
-        "SentryAlert USB Compatibility Diagnostics",
-        "==========================================",
+        f"SentryAlert {str(state.get('module', 'unknown')).title()} Diagnostics",
+        "=" * 48,
         "",
         f"Session: {state.get('session_id', 'unknown')}",
         f"Status: {state.get('status', 'unknown')}",
@@ -95,8 +96,8 @@ def _summary(state: dict[str, Any], inventory: dict[str, Any]) -> str:
         f"SentryAlert version: {inventory.get('sentryalert_version', 'unknown')}",
         f"Telegram delivery at bundle creation: {delivery.get('status', 'not attempted')}",
         "",
-        "This bundle is observational. Diagnostics did not modify USB gadget",
-        "configuration, backing storage, mounts, partitions, or SentryAlert.",
+        "This bundle is observational. Diagnostics did not modify SentryAlert",
+        "or the subsystem being investigated.",
         "",
         "Privacy note: hardware and USB identifiers may be present because they",
         "are useful when comparing affected systems. Telegram credentials are",
@@ -106,15 +107,76 @@ def _summary(state: dict[str, Any], inventory: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+def _read_json_lines(path: Path) -> list[dict[str, Any]]:
+    values: list[dict[str, Any]] = []
+    try:
+        for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
+            if line.strip():
+                value = json.loads(line)
+                if isinstance(value, dict):
+                    values.append(value)
+    except (OSError, ValueError, json.JSONDecodeError):
+        pass
+    return values
+
+
+def _report(state: dict[str, Any], session: Path, config: dict[str, Any]) -> str:
+    module_name = str(state.get("module", "usb"))
+    contract = create_module(module_name, int(config["command_timeout_seconds"])).contract()
+    events = _read_json_lines(session / "logs" / "events.jsonl")
+    samples = _read_json_lines(session / "logs" / "samples.jsonl")
+    known = [event for event in events if event.get("classification") == "known"]
+    candidates = [event for event in events if event.get("classification") == "candidate"]
+    markers = [event for event in events if event.get("classification") == "user_marker"]
+    lines = [
+        str(contract["title"]),
+        "=" * len(str(contract["title"])),
+        "",
+        f"Result: {'EVENTS REQUIRE REVIEW' if events else 'NO MATCHING EVENTS DETECTED'}",
+        f"Known errors: {len(known)}",
+        f"Unclassified suspicious events: {len(candidates)}",
+        f"User-marked incidents: {len(markers)}",
+        f"Samples collected: {len(samples)}",
+        "",
+        "Source coverage",
+        "---------------",
+    ]
+    coverage = samples[-1].get("coverage", {}) if samples else {}
+    for source in contract.get("sources", []):
+        name = str(source["name"])
+        value = coverage.get(name, {})
+        status = "available" if value.get("available") else "UNAVAILABLE"
+        lines.append(f"- {name}: {status} — {value.get('detail', 'not reported')}")
+    lines.extend(["", "Event timeline", "--------------"])
+    if not events:
+        lines.append("No known or suspicious events were detected during this session.")
+    for event in events:
+        lines.append(
+            f"{event.get('timestamp', 'unknown')} [{str(event.get('classification', 'event')).upper()}] "
+            f"{event.get('source', 'unknown')}: {event.get('message', '')}"
+        )
+    lines.extend([
+        "",
+        "Interpretation note",
+        "-------------------",
+        "A clean result means no matching event was observed in the available sources.",
+        "It is not proof that no fault occurred when a required source is unavailable.",
+        "",
+    ])
+    return "\n".join(lines)
+
+
 def create_bundle(state: dict[str, Any], config: dict[str, Any]) -> Path:
-    EXPORTS_DIR.mkdir(parents=True, exist_ok=True)
+    module_name = str(state.get("module", "usb"))
+    output_dir = exports_dir(module_name)
+    output_dir.mkdir(parents=True, exist_ok=True)
     session_id = str(state["session_id"])
-    session = session_root(session_id)
+    session = session_root(session_id, module_name)
     inventory = _inventory(config)
-    filename = f"usb-diag-{session_id}.zip"
-    final_path = EXPORTS_DIR / filename
+    filename = f"{module_name}-diag-{session_id}.zip"
+    final_path = output_dir / filename
     descriptor, temporary_name = tempfile.mkstemp(
-        prefix=f".{filename}.", suffix=".tmp", dir=EXPORTS_DIR
+        prefix=f".{filename}.", suffix=".tmp", dir=output_dir
     )
     os.close(descriptor)
     temporary_path = Path(temporary_name)
@@ -139,6 +201,16 @@ def create_bundle(state: dict[str, Any], config: dict[str, Any]) -> Path:
                 json.dumps(inventory, indent=2, sort_keys=True).encode("utf-8") + b"\n",
             )
             add_bytes(archive, "SUMMARY.txt", _summary(state, inventory).encode("utf-8"))
+            add_bytes(archive, "REPORT.txt", _report(state, session, config).encode("utf-8"))
+            add_bytes(
+                archive,
+                "CONTRACT.json",
+                json.dumps(
+                    create_module(module_name, int(config["command_timeout_seconds"])).contract(),
+                    indent=2,
+                    sort_keys=True,
+                ).encode("utf-8") + b"\n",
+            )
             if session.exists():
                 for path in sorted(session.rglob("*")):
                     if path.is_file():
@@ -154,7 +226,7 @@ def create_bundle(state: dict[str, Any], config: dict[str, Any]) -> Path:
         with temporary_path.open("rb") as bundle:
             os.fsync(bundle.fileno())
         os.replace(temporary_path, final_path)
-        directory = os.open(EXPORTS_DIR, os.O_RDONLY)
+        directory = os.open(output_dir, os.O_RDONLY)
         try:
             os.fsync(directory)
         finally:

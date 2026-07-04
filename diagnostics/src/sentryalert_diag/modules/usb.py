@@ -20,14 +20,46 @@ EVENT_PATTERN = re.compile(
     r"device.*offline|timed? ?out)",
     re.IGNORECASE,
 )
+USB_CANDIDATE_PATTERN = re.compile(
+    r"(usb|dwc3|gadget|mass.storage|block|sd[a-z]|exfat|mount).{0,80}"
+    r"(warn|error|fail|reset|disconnect|timeout|offline|corrupt|read.only|UI_[a-z]\d+)",
+    re.IGNORECASE,
+)
+APP_EVENT_PATTERN = re.compile(r"\bUI_[a-z]\d+\b|usb.{0,80}(error|fail|malfunction)", re.IGNORECASE)
 
 
 class UsbDiagnosticModule(DiagnosticModule):
     name = "usb"
+    title = "SentryAlert USB Compatibility Diagnostics"
 
     def __init__(self, timeout: int = 10) -> None:
         self.timeout = timeout
-        self._known_kernel_lines: set[str] | None = None
+        self._previous_kernel_lines: list[str] | None = None
+        self._previous_app_lines: list[str] | None = None
+
+    def contract(self) -> dict[str, Any]:
+        return {
+            "schema_version": 1,
+            "module": self.name,
+            "title": self.title,
+            "collection_levels": {
+                "sample": "bounded raw kernel, application, USB, mount, block and system state",
+                "event": "known errors and unclassified USB-related warning candidates",
+                "snapshot": "full sample plus process, interrupt and kernel-module context",
+            },
+            "event_severities": ["error", "warning", "notice"],
+            "retention": "bounded by maximum_log_bytes and maximum_snapshots",
+            "failure_modes": [
+                "USB disconnect or reset", "I/O error", "USB timeout",
+                "filesystem error", "gadget state failure", "SentryAlert USB UI error",
+            ],
+            "sources": [
+                {"name": "kernel_log", "required": True, "fallback": "journalctl -k"},
+                {"name": "application_log", "required": True, "fallback": "PM2 log files"},
+                {"name": "usb_gadget_state", "required": True},
+                {"name": "mounts_and_block_devices", "required": True},
+            ],
+        }
 
     def _command(self, arguments: list[str]) -> dict[str, Any]:
         return run_command(arguments, self.timeout)
@@ -37,6 +69,25 @@ class UsbDiagnosticModule(DiagnosticModule):
         if result["exit_code"] != 0:
             result = self._command(["journalctl", "-k", "-b", "--no-pager", "-o", "short-monotonic"])
         return [line for line in result["output"].splitlines() if line.strip()]
+
+    def _app_lines(self) -> tuple[list[str], dict[str, Any]]:
+        result = self._command(
+            ["pm2", "logs", "SentryAlert", "--nostream", "--raw", "--lines", "500"]
+        )
+        lines = (result["output"] + "\n" + result["error"]).splitlines()
+        return [line for line in lines if line.strip()][-1000:], result
+
+    @staticmethod
+    def _new_lines(previous: list[str] | None, current: list[str]) -> list[str]:
+        if previous is None:
+            return []
+        maximum = min(len(previous), len(current))
+        overlap = 0
+        for size in range(maximum, 0, -1):
+            if previous[-size:] == current[:size]:
+                overlap = size
+                break
+        return current[overlap:]
 
     def collect_sample(self) -> dict[str, Any]:
         configfs = Path("/sys/kernel/config/usb_gadget/sentryalert")
@@ -56,7 +107,8 @@ class UsbDiagnosticModule(DiagnosticModule):
                 )
             gadget["luns"] = luns
 
-        kernel_lines = self._kernel_lines()[-500:]
+        kernel_lines = self._kernel_lines()[-1000:]
+        app_lines, app_result = self._app_lines()
         matching_kernel = [line for line in kernel_lines if EVENT_PATTERN.search(line)][-100:]
         recent_usb_kernel = [
             line for line in kernel_lines if re.search(r"\busb\b", line, re.IGNORECASE)
@@ -77,29 +129,53 @@ class UsbDiagnosticModule(DiagnosticModule):
             "gadget": gadget,
             "recent_usb_kernel_messages": recent_usb_kernel,
             "matching_kernel_messages": matching_kernel,
+            "recent_application_messages": app_lines[-500:],
+            "coverage": {
+                "kernel_log": {
+                    "available": bool(kernel_lines),
+                    "detail": "available" if kernel_lines else "dmesg and kernel journal returned no lines",
+                },
+                "application_log": {
+                    "available": app_result["exit_code"] == 0,
+                    "detail": app_result["error"] or "available",
+                },
+                "usb_gadget_state": {
+                    "available": configfs.is_dir(),
+                    "detail": "available" if configfs.is_dir() else "gadget path not present",
+                },
+                "mounts_and_block_devices": {"available": True, "detail": "collected"},
+            },
         }
 
     def check_events(self) -> list[dict[str, Any]]:
-        lines = self._kernel_lines()
-        fingerprints = {
-            hashlib.sha256(line.encode("utf-8", errors="replace")).hexdigest(): line
-            for line in lines[-4000:]
-        }
-        if self._known_kernel_lines is None:
-            self._known_kernel_lines = set(fingerprints)
-            return []
-        new_keys = set(fingerprints).difference(self._known_kernel_lines)
-        self._known_kernel_lines = set(fingerprints)
-        return [
-            {
+        kernel = self._kernel_lines()[-4000:]
+        app, _result = self._app_lines()
+        new_kernel = self._new_lines(self._previous_kernel_lines, kernel)
+        new_app = self._new_lines(self._previous_app_lines, app)
+        self._previous_kernel_lines = kernel
+        self._previous_app_lines = app
+        events: list[dict[str, Any]] = []
+        for source, lines, known_pattern, candidate_pattern in (
+            ("kernel", new_kernel, EVENT_PATTERN, USB_CANDIDATE_PATTERN),
+            ("application", new_app, APP_EVENT_PATTERN, USB_CANDIDATE_PATTERN),
+        ):
+            for line in lines:
+                classification = (
+                    "known" if known_pattern.search(line)
+                    else "candidate" if candidate_pattern.search(line)
+                    else None
+                )
+                if not classification:
+                    continue
+                events.append({
                 "timestamp": utc_now(),
-                "source": "kernel",
-                "fingerprint": key,
-                "message": fingerprints[key],
-            }
-            for key in new_keys
-            if EVENT_PATTERN.search(fingerprints[key])
-        ]
+                    "source": source,
+                    "classification": classification,
+                    "severity": "error" if classification == "known" else "warning",
+                    "fingerprint": hashlib.sha256(line.encode("utf-8", errors="replace")).hexdigest(),
+                    "message": line,
+                })
+        return events
 
     def collect_snapshot(self, reason: dict[str, Any], destination: Path) -> None:
         snapshot = {

@@ -8,7 +8,7 @@ from typing import Any
 
 from .config import load_config
 from .exporter import create_bundle
-from .modules.usb import UsbDiagnosticModule
+from .modules.registry import create_module
 from .paths import session_root
 from .state import (
     append_json_line,
@@ -27,7 +27,9 @@ class DiagnosticsRunner:
         self.wake_requested = False
         self.shutdown_requested = False
         self.last_snapshot_monotonic: float | None = None
-        self.module = UsbDiagnosticModule(int(self.config["command_timeout_seconds"]))
+        state = load_state()
+        module_name = str(state.get("module", "usb")) if state else "usb"
+        self.module = create_module(module_name, int(self.config["command_timeout_seconds"]))
 
     def _wake(self, _signum: int, _frame: Any) -> None:
         self.wake_requested = True
@@ -43,11 +45,13 @@ class DiagnosticsRunner:
         now = time.monotonic()
         cooldown = int(self.config["snapshot_cooldown_seconds"])
         if (
+            event.get("classification") != "user_marker"
+            and
             self.last_snapshot_monotonic is not None
             and now - self.last_snapshot_monotonic < cooldown
         ):
             return
-        directory = session_root(str(state["session_id"])) / "snapshots"
+        directory = session_root(str(state["session_id"]), str(state.get("module", "usb"))) / "snapshots"
         destination = directory / f"{int(time.time())}-{state.get('snapshot_count', 0) + 1}.json"
         self.module.collect_snapshot(event, destination)
         state["snapshot_count"] = int(state.get("snapshot_count", 0)) + 1
@@ -99,7 +103,7 @@ class DiagnosticsRunner:
             return self._finalize(state, "runtime_complete")
 
         session_id = str(state["session_id"])
-        log_dir = session_root(session_id) / "logs"
+        log_dir = session_root(session_id, str(state.get("module", "usb"))) / "logs"
         sample_log = log_dir / "samples.jsonl"
         event_log = log_dir / "events.jsonl"
         maximum_log = int(self.config["maximum_log_bytes"])
@@ -110,13 +114,26 @@ class DiagnosticsRunner:
 
         while True:
             cycle_started = time.monotonic()
+            processed_marker_ids: set[Any] = set()
             try:
                 sample = self.module.collect_sample()
                 append_json_line(sample_log, sample, maximum_log)
                 events = self.module.check_events()
+                pending_markers = list(state.get("pending_markers", []))
+                processed_marker_ids = {marker.get("id") for marker in pending_markers}
+                state["pending_markers"] = []
+                events.extend(pending_markers)
                 for event in events:
                     append_json_line(event_log, event, maximum_log)
                     state["event_count"] = int(state.get("event_count", 0)) + 1
+                    classification = str(event.get("classification", "candidate"))
+                    counter = {
+                        "known": "known_event_count",
+                        "candidate": "candidate_event_count",
+                        "user_marker": "user_marker_count",
+                    }.get(classification)
+                    if counter:
+                        state[counter] = int(state.get(counter, 0)) + 1
                     self._snapshot(state, event)
                 state.pop("last_collection_error", None)
             except Exception as exception:
@@ -133,6 +150,10 @@ class DiagnosticsRunner:
                 current = load_state()
                 if current and current.get("session_id") == session_id:
                     state["stop_requested"] = bool(current.get("stop_requested", False))
+                    state["pending_markers"] = [
+                        marker for marker in current.get("pending_markers", [])
+                        if marker.get("id") not in processed_marker_ids
+                    ]
                 save_state(state)
 
             if self.shutdown_requested:

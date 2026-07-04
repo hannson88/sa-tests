@@ -7,6 +7,12 @@ from typing import Any
 
 class DiagnosticModule(ABC):
     name: str
+    title: str
+
+    @abstractmethod
+    def contract(self) -> dict[str, Any]:
+        """Describe sources, failure modes, and evidence guarantees."""
+        raise NotImplementedError
 
     @abstractmethod
     def collect_sample(self) -> dict[str, Any]:
@@ -19,4 +25,3 @@ class DiagnosticModule(ABC):
     @abstractmethod
     def collect_snapshot(self, reason: dict[str, Any], destination: Path) -> None:
         raise NotImplementedError
-

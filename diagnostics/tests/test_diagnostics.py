@@ -16,6 +16,9 @@ from sentryalert_diag import atomic, config as diag_config, state
 from sentryalert_diag.cli import parse_duration
 from sentryalert_diag.exporter import _sentryalert_version
 from sentryalert_diag.modules.usb import UsbDiagnosticModule
+from sentryalert_diag.modules.registry import MODULE_NAMES, create_module
+from sentryalert_diag.validator import validate_bundle
+from sentryalert_diag.system import redact_text
 
 
 class DurationTests(unittest.TestCase):
@@ -109,6 +112,45 @@ class UsbEventTests(unittest.TestCase):
             module.check_events()
             self.assertEqual(module.check_events(), [])
 
+    def test_repeated_identical_error_is_not_lost(self) -> None:
+        module = UsbDiagnosticModule()
+        error = "usb 1 disconnect error"
+        with mock.patch.object(module, "_kernel_lines", side_effect=[[error], [error, error]]), \
+             mock.patch.object(module, "_app_lines", return_value=([], {"exit_code": 0, "error": ""})):
+            self.assertEqual(module.check_events(), [])
+            events = module.check_events()
+        self.assertEqual(len(events), 1)
+        self.assertEqual(events[0]["classification"], "known")
+
+    def test_application_ui_code_becomes_known_event(self) -> None:
+        module = UsbDiagnosticModule()
+        with mock.patch.object(module, "_kernel_lines", return_value=[]), \
+             mock.patch.object(
+                 module,
+                 "_app_lines",
+                 side_effect=[
+                     ([], {"exit_code": 0, "error": ""}),
+                     (["UI_a112 USB device malfunction"], {"exit_code": 0, "error": ""}),
+                 ],
+             ):
+            module.check_events()
+            events = module.check_events()
+        self.assertEqual(events[0]["source"], "application")
+        self.assertEqual(events[0]["classification"], "known")
+
+
+class ModuleRegistryTests(unittest.TestCase):
+    def test_all_documented_modules_have_contracts(self) -> None:
+        self.assertEqual(
+            set(MODULE_NAMES),
+            {"usb", "app", "storage", "camera", "network", "system", "performance"},
+        )
+        for name in MODULE_NAMES:
+            contract = create_module(name).contract()
+            self.assertEqual(contract["module"], name)
+            self.assertTrue(contract["sources"])
+            self.assertTrue(contract["failure_modes"])
+
 
 class ConfigSummaryTests(unittest.TestCase):
     def test_helper_never_outputs_telegram_credentials(self) -> None:
@@ -133,6 +175,14 @@ class ConfigSummaryTests(unittest.TestCase):
             summary = json.loads(result.stdout)
             self.assertTrue(summary["telegram"]["tokenConfigured"])
             self.assertTrue(summary["telegram"]["chatIdConfigured"])
+
+    def test_raw_log_secrets_are_redacted(self) -> None:
+        value = redact_text(
+            "telegramAPIToken=123456789:ABCDEFGHIJKLMNOPQRSTUVWXYZabcd "
+            "telegramChatID=99887766"
+        )
+        self.assertNotIn("ABCDEFGHIJKLMNOPQRSTUVWXYZ", value)
+        self.assertNotIn("99887766", value)
 
 
 class EndToEndSessionTests(unittest.TestCase):
@@ -178,6 +228,13 @@ class EndToEndSessionTests(unittest.TestCase):
                 env=environment,
             )
             subprocess.run(
+                [sys.executable, cli, "mark", "USB error appeared on screen"],
+                check=True,
+                capture_output=True,
+                text=True,
+                env=environment,
+            )
+            subprocess.run(
                 [sys.executable, cli, "daemon"],
                 check=True,
                 capture_output=True,
@@ -198,9 +255,17 @@ class EndToEndSessionTests(unittest.TestCase):
             self.assertTrue(bundle.is_file())
             with zipfile.ZipFile(bundle) as archive:
                 self.assertIn("SUMMARY.txt", archive.namelist())
+                self.assertIn("REPORT.txt", archive.namelist())
+                self.assertIn("CONTRACT.json", archive.namelist())
                 self.assertIn("MANIFEST.sha256", archive.namelist())
+                self.assertTrue(
+                    any(name.endswith("/logs/events.jsonl") for name in archive.namelist())
+                )
+                report = archive.read("REPORT.txt").decode("utf-8")
+                self.assertIn("User-marked incidents: 1", report)
                 bundled_state = json.loads(archive.read("state.json"))
                 self.assertEqual(bundled_state["telegram_delivery"]["status"], "pending")
+            self.assertTrue(validate_bundle(bundle)["valid"])
 
             # Simulate power loss after completion was checkpointed but before
             # export finished. Boot recovery must retry finalization immediately.

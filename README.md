@@ -6,6 +6,5 @@ encoding, storage, mount, or alert pipeline.
 
 ## Packages
 
-- [`diagnostics/`](diagnostics/) — crash-safe diagnostics framework. Version 1
-  provides observational USB compatibility diagnostics.
-
+- [`diagnostics/`](diagnostics/) — crash-safe, module-driven diagnostics for USB,
+  application, storage, camera, network, system, and performance investigations.
