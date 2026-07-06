@@ -31,11 +31,11 @@ class DurationTests(unittest.TestCase):
         with self.assertRaises(Exception):
             parse_duration("0m")
 
-    def test_default_runtime_is_thirty_minutes(self) -> None:
+    def test_default_runtime_is_five_minutes(self) -> None:
         with tempfile.TemporaryDirectory() as directory, mock.patch.object(
             diag_config, "CONFIG_PATH", Path(directory) / "missing.json"
         ):
-            self.assertEqual(diag_config.load_config()["default_runtime_seconds"], 1800)
+            self.assertEqual(diag_config.load_config()["default_runtime_seconds"], 300)
 
 
 class VersionDetectionTests(unittest.TestCase):

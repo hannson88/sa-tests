@@ -110,7 +110,11 @@ if [ ! -f "$DATA_ROOT/config.json" ]; then
   install -m 0600 "$release_dir/config/default.json" "$DATA_ROOT/config.json"
 elif grep -q '"default_runtime_seconds"[[:space:]]*:[[:space:]]*7200' "$DATA_ROOT/config.json"; then
   sed -i \
-    's/"default_runtime_seconds"[[:space:]]*:[[:space:]]*7200/"default_runtime_seconds": 1800/' \
+    's/"default_runtime_seconds"[[:space:]]*:[[:space:]]*7200/"default_runtime_seconds": 300/' \
+    "$DATA_ROOT/config.json"
+elif grep -q '"default_runtime_seconds"[[:space:]]*:[[:space:]]*1800' "$DATA_ROOT/config.json"; then
+  sed -i \
+    's/"default_runtime_seconds"[[:space:]]*:[[:space:]]*1800/"default_runtime_seconds": 300/' \
     "$DATA_ROOT/config.json"
 fi
 

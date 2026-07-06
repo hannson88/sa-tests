@@ -20,7 +20,7 @@ Installation does not start diagnostics.
 # List available modules
 sentryalert-diag modules
 
-# Start any module (30 minutes by default)
+# Start any module (5 minutes by default)
 sudo sentryalert-diag start usb
 sudo sentryalert-diag start app --duration 30m
 sudo sentryalert-diag start storage --duration 30m
@@ -50,8 +50,8 @@ sudo sentryalert-diag-uninstall
 sudo sentryalert-diag-uninstall --purge
 ```
 
-Supported duration syntax includes `30m`, `2h`, `6h`, and `24h`. The default is
-30 minutes of diagnostics runner uptime. Time while the computer is off does not
+Supported duration syntax includes `5m`, `30m`, `2h`, and `24h`. The default is
+5 minutes of diagnostics runner uptime. Time while the computer is off does not
 count.
 
 ## Reading a bundle
