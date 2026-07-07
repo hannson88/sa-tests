@@ -45,6 +45,21 @@ def systemctl(*arguments: str) -> None:
     subprocess.run(["systemctl", *arguments], check=False)
 
 
+def missing_state_message() -> str:
+    return (
+        "No diagnostics session was found.\n"
+        "If you want to collect USB diagnostics, start one with:\n"
+        "  sudo sentryalert-usb-diag-start"
+    )
+
+
+def require_state() -> dict:
+    state = load_state()
+    if not state:
+        raise SystemExit(missing_state_message())
+    return state
+
+
 def command_start(args: argparse.Namespace) -> int:
     require_root()
     ensure_config()
@@ -104,7 +119,11 @@ def command_status(_args: argparse.Namespace) -> int:
 def command_stop(_args: argparse.Namespace) -> int:
     require_root()
     with state_lock():
-        state = load_state(required=True)
+        state = load_state()
+        if not state:
+            print("Diagnostics are not running.")
+            print(missing_state_message())
+            return 0
         if not state.get("enabled"):
             print("Diagnostics are not running.")
             return 0
@@ -119,10 +138,10 @@ def command_stop(_args: argparse.Namespace) -> int:
 def command_export(_args: argparse.Namespace) -> int:
     require_root()
     config = load_config()
-    state = load_state(required=True)
+    state = require_state()
     bundle = create_bundle(state, config)
     with state_lock():
-        state = load_state(required=True)
+        state = require_state()
         state["export_path"] = str(bundle)
         save_state(state)
     print(bundle)
@@ -132,13 +151,13 @@ def command_export(_args: argparse.Namespace) -> int:
 def command_resend(_args: argparse.Namespace) -> int:
     require_root()
     config = load_config()
-    state = load_state(required=True)
+    state = require_state()
     export_path = state.get("export_path")
     if not export_path or not Path(export_path).is_file():
         export_path = str(create_bundle(state, config))
     result = deliver(Path(export_path), config)
     with state_lock():
-        state = load_state(required=True)
+        state = require_state()
         state["export_path"] = export_path
         state["telegram_delivery"] = result
         save_state(state)
@@ -164,7 +183,7 @@ def command_mark(args: argparse.Namespace) -> int:
         "message": args.message,
     }
     with state_lock():
-        state = load_state(required=True)
+        state = require_state()
         if not state.get("enabled"):
             raise SystemExit("Diagnostics are not running.")
         state.setdefault("pending_markers", []).append(marker)

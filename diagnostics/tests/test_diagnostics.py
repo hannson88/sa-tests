@@ -185,6 +185,31 @@ class ConfigSummaryTests(unittest.TestCase):
         self.assertNotIn("99887766", value)
 
 
+class CommandHardeningTests(unittest.TestCase):
+    def test_stop_without_session_is_friendly(self) -> None:
+        import subprocess
+
+        with tempfile.TemporaryDirectory() as directory:
+            environment = {
+                **os.environ,
+                "SENTRYALERT_DIAG_DATA_ROOT": directory,
+                "SENTRYALERT_DIAG_ALLOW_NONROOT": "1",
+                "SENTRYALERT_DIAG_SKIP_SYSTEMD": "1",
+                "PYTHONPATH": str(DIAGNOSTICS_ROOT / "src"),
+            }
+            cli = str(DIAGNOSTICS_ROOT / "src" / "diagnostics_cli.py")
+            result = subprocess.run(
+                [sys.executable, cli, "stop"],
+                check=True,
+                capture_output=True,
+                text=True,
+                env=environment,
+            )
+        self.assertIn("Diagnostics are not running.", result.stdout)
+        self.assertIn("sudo sentryalert-usb-diag-start", result.stdout)
+        self.assertNotIn("Traceback", result.stderr + result.stdout)
+
+
 class EndToEndSessionTests(unittest.TestCase):
     def test_one_second_session_completes_and_exports(self) -> None:
         import subprocess
