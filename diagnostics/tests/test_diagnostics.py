@@ -141,7 +141,9 @@ class UsbEventTests(unittest.TestCase):
 
     def test_pm2_logs_use_root_pm2_home_on_read_only_devices(self) -> None:
         module = UsbDiagnosticModule()
-        with mock.patch.object(usb_module, "run_command") as run_command, \
+        with tempfile.TemporaryDirectory() as directory, \
+             mock.patch.object(usb_module, "DATA_ROOT", Path(directory)), \
+             mock.patch.object(usb_module, "run_command") as run_command, \
              mock.patch.object(module, "_app_log_file_lines", return_value=([], {"exit_code": 1, "error": ""})):
             run_command.return_value = {
                 "command": [],
@@ -150,10 +152,12 @@ class UsbEventTests(unittest.TestCase):
                 "error": "",
             }
             lines, result = module._app_lines()
-        self.assertIn("UI_a111", "\n".join(lines))
-        self.assertEqual(result["exit_code"], 0)
-        self.assertEqual(run_command.call_args.kwargs["extra_env"]["HOME"], "/root")
-        self.assertEqual(run_command.call_args.kwargs["extra_env"]["PM2_HOME"], "/root/.pm2")
+            self.assertIn("UI_a111", "\n".join(lines))
+            self.assertEqual(result["exit_code"], 0)
+            expected_home = str(Path(directory) / "pm2-home")
+            self.assertEqual(run_command.call_args.kwargs["extra_env"]["HOME"], expected_home)
+            self.assertEqual(run_command.call_args.kwargs["extra_env"]["PM2_HOME"], expected_home)
+            self.assertTrue(Path(expected_home).is_dir())
 
     def test_pm2_log_file_fallback_recovers_ui_codes(self) -> None:
         module = UsbDiagnosticModule()

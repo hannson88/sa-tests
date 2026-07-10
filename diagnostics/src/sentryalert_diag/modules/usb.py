@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from ..atomic import atomic_write_json
+from ..paths import DATA_ROOT
 from ..state import utc_now
 from ..system import MAX_OUTPUT_BYTES, read_text, redact_text, run_command
 from .base import DiagnosticModule
@@ -72,11 +73,21 @@ class UsbDiagnosticModule(DiagnosticModule):
         return [line for line in result["output"].splitlines() if line.strip()]
 
     def _app_lines(self) -> tuple[list[str], dict[str, Any]]:
-        result = run_command(
-            ["pm2", "logs", "SentryAlert", "--nostream", "--raw", "--lines", "500"],
-            self.timeout,
-            extra_env={"HOME": "/root", "PM2_HOME": "/root/.pm2"},
-        )
+        pm2_home = DATA_ROOT / "pm2-home"
+        try:
+            pm2_home.mkdir(parents=True, exist_ok=True)
+            result = run_command(
+                ["pm2", "logs", "SentryAlert", "--nostream", "--raw", "--lines", "500"],
+                self.timeout,
+                extra_env={"HOME": str(pm2_home), "PM2_HOME": str(pm2_home)},
+            )
+        except OSError as error:
+            result = {
+                "command": ["pm2", "logs", "SentryAlert", "--nostream", "--raw", "--lines", "500"],
+                "exit_code": None,
+                "output": "",
+                "error": f"could not prepare writable PM2_HOME {pm2_home}: {error}",
+            }
         lines = (result["output"] + "\n" + result["error"]).splitlines()
         fallback_lines, fallback_result = self._app_log_file_lines()
         if fallback_lines:
