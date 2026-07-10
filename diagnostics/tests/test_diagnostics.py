@@ -15,6 +15,7 @@ sys.path.insert(0, str(DIAGNOSTICS_ROOT / "src"))
 from sentryalert_diag import atomic, config as diag_config, state
 from sentryalert_diag.cli import parse_duration
 from sentryalert_diag.exporter import _sentryalert_version
+from sentryalert_diag.modules import usb as usb_module
 from sentryalert_diag.modules.usb import UsbDiagnosticModule
 from sentryalert_diag.modules.registry import MODULE_NAMES, create_module
 from sentryalert_diag.validator import validate_bundle
@@ -137,6 +138,40 @@ class UsbEventTests(unittest.TestCase):
             events = module.check_events()
         self.assertEqual(events[0]["source"], "application")
         self.assertEqual(events[0]["classification"], "known")
+
+    def test_pm2_logs_use_root_pm2_home_on_read_only_devices(self) -> None:
+        module = UsbDiagnosticModule()
+        with mock.patch.object(usb_module, "run_command") as run_command, \
+             mock.patch.object(module, "_app_log_file_lines", return_value=([], {"exit_code": 1, "error": ""})):
+            run_command.return_value = {
+                "command": [],
+                "exit_code": 0,
+                "output": "UI_a111 Re-insert USB into glovebox for higher speed\n",
+                "error": "",
+            }
+            lines, result = module._app_lines()
+        self.assertIn("UI_a111", "\n".join(lines))
+        self.assertEqual(result["exit_code"], 0)
+        self.assertEqual(run_command.call_args.kwargs["extra_env"]["HOME"], "/root")
+        self.assertEqual(run_command.call_args.kwargs["extra_env"]["PM2_HOME"], "/root/.pm2")
+
+    def test_pm2_log_file_fallback_recovers_ui_codes(self) -> None:
+        module = UsbDiagnosticModule()
+        with tempfile.TemporaryDirectory() as directory, \
+             mock.patch.object(usb_module, "APP_LOG_DIRS", (Path(directory),)), \
+             mock.patch.object(usb_module, "run_command") as run_command:
+            Path(directory, "SentryAlert-error.log").write_text(
+                "UI_a112 USB device malfunction (I/O Error)\n", encoding="utf-8"
+            )
+            run_command.return_value = {
+                "command": [],
+                "exit_code": 1,
+                "output": "",
+                "error": "Error: EROFS: read-only file system, mkdir '/etc/.pm2'",
+            }
+            lines, result = module._app_lines()
+        self.assertIn("UI_a112 USB device malfunction", "\n".join(lines))
+        self.assertEqual(result["exit_code"], 0)
 
 
 class ModuleRegistryTests(unittest.TestCase):

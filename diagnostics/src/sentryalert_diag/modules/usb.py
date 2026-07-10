@@ -10,7 +10,7 @@ from typing import Any
 
 from ..atomic import atomic_write_json
 from ..state import utc_now
-from ..system import read_text, run_command
+from ..system import MAX_OUTPUT_BYTES, read_text, redact_text, run_command
 from .base import DiagnosticModule
 
 
@@ -26,6 +26,7 @@ USB_CANDIDATE_PATTERN = re.compile(
     re.IGNORECASE,
 )
 APP_EVENT_PATTERN = re.compile(r"\bUI_[a-z]\d+\b|usb.{0,80}(error|fail|malfunction)", re.IGNORECASE)
+APP_LOG_DIRS = (Path("/root/.pm2/logs"), Path("/mutable/.pm2/logs"), Path("/etc/.pm2/logs"))
 
 
 class UsbDiagnosticModule(DiagnosticModule):
@@ -71,11 +72,45 @@ class UsbDiagnosticModule(DiagnosticModule):
         return [line for line in result["output"].splitlines() if line.strip()]
 
     def _app_lines(self) -> tuple[list[str], dict[str, Any]]:
-        result = self._command(
-            ["pm2", "logs", "SentryAlert", "--nostream", "--raw", "--lines", "500"]
+        result = run_command(
+            ["pm2", "logs", "SentryAlert", "--nostream", "--raw", "--lines", "500"],
+            self.timeout,
+            extra_env={"HOME": "/root", "PM2_HOME": "/root/.pm2"},
         )
         lines = (result["output"] + "\n" + result["error"]).splitlines()
+        fallback_lines, fallback_result = self._app_log_file_lines()
+        if fallback_lines:
+            lines.extend(fallback_lines)
+            result = {
+                **result,
+                "fallback": fallback_result,
+                "exit_code": 0 if result["exit_code"] == 0 else fallback_result["exit_code"],
+                "error": result["error"] if result["exit_code"] == 0 else fallback_result["error"],
+            }
         return [line for line in lines if line.strip()][-1000:], result
+
+    def _app_log_file_lines(self) -> tuple[list[str], dict[str, Any]]:
+        candidates: list[Path] = []
+        for root in APP_LOG_DIRS:
+            if root.is_dir():
+                candidates.extend(sorted(root.glob("SentryAlert*.log")))
+                candidates.extend(sorted(root.glob("sentryalert*.log")))
+        lines: list[str] = []
+        read_files: list[str] = []
+        errors: list[str] = []
+        for path in candidates:
+            try:
+                data = path.read_bytes()[-MAX_OUTPUT_BYTES:]
+                lines.extend(redact_text(data.decode("utf-8", errors="replace")).splitlines())
+                read_files.append(str(path))
+            except OSError as error:
+                errors.append(f"{path}: {error}")
+        return lines[-1000:], {
+            "command": ["read_pm2_log_files"],
+            "exit_code": 0 if read_files else 1,
+            "output": f"read {len(read_files)} file(s): " + ", ".join(read_files),
+            "error": "; ".join(errors) if errors else ("" if read_files else "no PM2 log files found"),
+        }
 
     @staticmethod
     def _new_lines(previous: list[str] | None, current: list[str]) -> list[str]:

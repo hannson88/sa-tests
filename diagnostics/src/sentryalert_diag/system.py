@@ -22,7 +22,11 @@ def redact_text(value: str) -> str:
     return SECRET_PATTERNS[1].sub(r"\1\2[REDACTED]", value)
 
 
-def run_command(arguments: list[str], timeout: int = 10) -> dict[str, Any]:
+def run_command(
+    arguments: list[str],
+    timeout: int = 10,
+    extra_env: dict[str, str] | None = None,
+) -> dict[str, Any]:
     try:
         result = subprocess.run(
             arguments,
@@ -30,7 +34,7 @@ def run_command(arguments: list[str], timeout: int = 10) -> dict[str, Any]:
             capture_output=True,
             text=True,
             timeout=timeout,
-            env={**os.environ, "LC_ALL": "C"},
+            env={**os.environ, "LC_ALL": "C", **(extra_env or {})},
         )
         output = redact_text(result.stdout[-MAX_OUTPUT_BYTES:])
         error = redact_text(result.stderr[-65536:])
