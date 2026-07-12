@@ -128,6 +128,7 @@ commands=(
   sentryalert-usb-diag-stop
   sentryalert-usb-diag-export
   sentryalert-usb-diag-resend
+  sentryalert-usb-storage-check
   sentryalert-diag-version
   sentryalert-diag-update
   sentryalert-diag-uninstall

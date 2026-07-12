@@ -12,6 +12,7 @@ from typing import Any
 from .paths import PACKAGE_ROOT, exports_dir, session_root
 from .modules.registry import create_module
 from .state import utc_now
+from .storage_layout import collect_storage_layout, render_storage_layout_report
 from .system import read_text, run_command
 
 
@@ -74,6 +75,7 @@ def _inventory(config: dict[str, Any]) -> dict[str, Any]:
         "commands": {
             name: run_command(arguments, timeout) for name, arguments in commands.items()
         },
+        "storage_layout": collect_storage_layout(timeout),
         "configuration": _configuration_summary(sentryalert_root),
     }
 
@@ -202,6 +204,11 @@ def create_bundle(state: dict[str, Any], config: dict[str, Any]) -> Path:
             )
             add_bytes(archive, "SUMMARY.txt", _summary(state, inventory).encode("utf-8"))
             add_bytes(archive, "REPORT.txt", _report(state, session, config).encode("utf-8"))
+            add_bytes(
+                archive,
+                "STORAGE_LAYOUT.txt",
+                render_storage_layout_report(inventory["storage_layout"]).encode("utf-8"),
+            )
             add_bytes(
                 archive,
                 "CONTRACT.json",

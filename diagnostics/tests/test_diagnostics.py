@@ -18,6 +18,7 @@ from sentryalert_diag.exporter import _sentryalert_version
 from sentryalert_diag.modules import usb as usb_module
 from sentryalert_diag.modules.usb import UsbDiagnosticModule
 from sentryalert_diag.modules.registry import MODULE_NAMES, create_module
+from sentryalert_diag.storage_layout import collect_storage_layout, render_storage_layout_report
 from sentryalert_diag.validator import validate_bundle
 from sentryalert_diag.system import redact_text
 
@@ -224,6 +225,34 @@ class ConfigSummaryTests(unittest.TestCase):
         self.assertNotIn("99887766", value)
 
 
+class StorageLayoutTests(unittest.TestCase):
+    def test_storage_layout_report_summarizes_expected_checks(self) -> None:
+        def fake_run(arguments: list[str], _timeout: int = 3, **_kwargs: object) -> dict:
+            command = " ".join(arguments)
+            output = ""
+            if arguments[:2] == ["lsblk", "-f"]:
+                output = "mmcblk1p4 exfat 1.0 CAM EBFF-FECD 79G 67% /mnt/cam\n"
+            elif arguments[:2] == ["fdisk", "-l"]:
+                output = "Disklabel type: gpt\n/dev/mmcblk1p1    2048    204799    202752    99M Microsoft basic data\n"
+            elif arguments[:3] == ["parted", "/dev/mmcblk1", "align-check"]:
+                output = f"{arguments[-1]} aligned\n"
+            elif arguments[:2] == ["find", "/mnt/cam"]:
+                output = "/mnt/cam/TeslaCam\n"
+            elif arguments[:2] == ["ls", "-la"]:
+                output = "TeslaCam\n"
+            return {"command": arguments, "exit_code": 0, "output": output, "error": "", "display": command}
+
+        with mock.patch("sentryalert_diag.storage_layout.run_command", side_effect=fake_run), \
+             mock.patch("sentryalert_diag.storage_layout.read_text", return_value="high-speed\n"):
+            layout = collect_storage_layout()
+        checks = layout["parsed"]["checks"]
+        self.assertTrue(checks["overall_storage_layout_ok"])
+        report = render_storage_layout_report(layout)
+        self.assertIn("Storage layout looks OK: YES", report)
+        self.assertIn("Partition 1: 1 aligned", report)
+        self.assertIn("Current speed: high-speed", report)
+
+
 class CommandHardeningTests(unittest.TestCase):
     def test_stop_without_session_is_friendly(self) -> None:
         import subprocess
@@ -320,6 +349,7 @@ class EndToEndSessionTests(unittest.TestCase):
             with zipfile.ZipFile(bundle) as archive:
                 self.assertIn("SUMMARY.txt", archive.namelist())
                 self.assertIn("REPORT.txt", archive.namelist())
+                self.assertIn("STORAGE_LAYOUT.txt", archive.namelist())
                 self.assertIn("CONTRACT.json", archive.namelist())
                 self.assertIn("MANIFEST.sha256", archive.namelist())
                 self.assertTrue(

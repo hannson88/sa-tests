@@ -11,6 +11,7 @@ case "$invoked_as" in
   sentryalert-usb-diag-stop) set -- stop "$@" ;;
   sentryalert-usb-diag-export) set -- export "$@" ;;
   sentryalert-usb-diag-resend) set -- resend "$@" ;;
+  sentryalert-usb-storage-check) set -- storage-check "$@" ;;
   sentryalert-diag-version) set -- version "$@" ;;
   sentryalert-diag-update) exec "$package_root/update.sh" "$@" ;;
   sentryalert-diag-uninstall) exec "$package_root/uninstall.sh" "$@" ;;

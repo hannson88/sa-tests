@@ -18,6 +18,7 @@ chmod 0755 \
   "$TEMPORARY/$PACKAGE_NAME/install.sh" \
   "$TEMPORARY/$PACKAGE_NAME/update.sh" \
   "$TEMPORARY/$PACKAGE_NAME/uninstall.sh" \
+  "$TEMPORARY/$PACKAGE_NAME/run-usb-storage-check.sh" \
   "$TEMPORARY/$PACKAGE_NAME/bin/sentryalert-diag"
 
 COPYFILE_DISABLE=1 tar \
@@ -28,11 +29,16 @@ COPYFILE_DISABLE=1 tar \
   -czf "$OUTPUT/$PACKAGE_NAME.tar.gz" \
   "$PACKAGE_NAME"
 cp "$TEMPORARY/$PACKAGE_NAME/install.sh" "$OUTPUT/install.sh"
+cp "$TEMPORARY/$PACKAGE_NAME/run-usb-storage-check.sh" "$OUTPUT/run-usb-storage-check.sh"
 sed "s/@RELEASE_REF@/v$VERSION/" "$OUTPUT/install.sh" > "$OUTPUT/install.sh.pinned"
 mv "$OUTPUT/install.sh.pinned" "$OUTPUT/install.sh"
+sed "s/RELEASE_REF=\"\${SENTRYALERT_DIAG_RELEASE_REF:-latest}\"/RELEASE_REF=\"\${SENTRYALERT_DIAG_RELEASE_REF:-v$VERSION}\"/" \
+  "$OUTPUT/run-usb-storage-check.sh" > "$OUTPUT/run-usb-storage-check.sh.pinned"
+mv "$OUTPUT/run-usb-storage-check.sh.pinned" "$OUTPUT/run-usb-storage-check.sh"
 chmod 0755 "$OUTPUT/install.sh"
+chmod 0755 "$OUTPUT/run-usb-storage-check.sh"
 (
   cd "$OUTPUT"
-  sha256sum "$PACKAGE_NAME.tar.gz" install.sh > checksums.txt
+  sha256sum "$PACKAGE_NAME.tar.gz" install.sh run-usb-storage-check.sh > checksums.txt
 )
 printf 'Release assets created in %s\n' "$OUTPUT"

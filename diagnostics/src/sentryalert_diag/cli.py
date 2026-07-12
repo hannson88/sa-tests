@@ -165,6 +165,53 @@ def command_resend(_args: argparse.Namespace) -> int:
     return 0 if result.get("status") in {"sent", "disabled"} else 1
 
 
+def command_storage_check(args: argparse.Namespace) -> int:
+    require_root()
+    ensure_config()
+    config = load_config()
+    package_version = (PACKAGE_ROOT / "VERSION").read_text(encoding="utf-8").strip()
+    session_id = uuid.uuid4().hex
+    module_name = "usb"
+    root = session_root(session_id, module_name)
+    (root / "logs").mkdir(parents=True, exist_ok=True)
+    (root / "snapshots").mkdir(parents=True, exist_ok=True)
+    for filename in ("events.jsonl", "samples.jsonl"):
+        (root / "logs" / filename).touch(mode=0o600, exist_ok=True)
+    state = {
+        "schema_version": 2,
+        "package_version": package_version,
+        "module": module_name,
+        "enabled": False,
+        "status": "completed",
+        "completion_reason": "storage_layout_check",
+        "session_id": session_id,
+        "runtime_target_seconds": 0,
+        "runtime_consumed_seconds": 0.0,
+        "start_timestamp": utc_now(),
+        "completed_at": utc_now(),
+        "last_checkpoint_at": utc_now(),
+        "last_boot_id": boot_id(),
+        "event_count": 0,
+        "known_event_count": 0,
+        "candidate_event_count": 0,
+        "user_marker_count": 0,
+        "snapshot_count": 0,
+        "stop_requested": False,
+        "telegram_delivery": {"status": "pending"},
+    }
+    bundle = create_bundle(state, config)
+    state["export_path"] = str(bundle)
+    if not args.no_telegram:
+        state["telegram_delivery"] = deliver(bundle, config)
+    else:
+        state["telegram_delivery"] = {"status": "disabled", "detail": "Skipped by --no-telegram."}
+    with state_lock():
+        save_state(state)
+    print(f"Storage layout check bundle: {bundle}")
+    print(json.dumps(state["telegram_delivery"], indent=2, sort_keys=True))
+    return 0 if state["telegram_delivery"].get("status") in {"sent", "disabled"} else 1
+
+
 def command_version(_args: argparse.Namespace) -> int:
     version = (PACKAGE_ROOT / "VERSION").read_text(encoding="utf-8").strip()
     build_date = (PACKAGE_ROOT / "BUILD_DATE").read_text(encoding="utf-8").strip()
@@ -217,6 +264,9 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers.add_parser("stop").set_defaults(function=command_stop)
     subparsers.add_parser("export").set_defaults(function=command_export)
     subparsers.add_parser("resend").set_defaults(function=command_resend)
+    storage_check = subparsers.add_parser("storage-check")
+    storage_check.add_argument("--no-telegram", action="store_true")
+    storage_check.set_defaults(function=command_storage_check)
     subparsers.add_parser("version").set_defaults(function=command_version)
     mark = subparsers.add_parser("mark")
     mark.add_argument("message")
